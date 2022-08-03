@@ -110,13 +110,18 @@ def record_ING_transactions(infile):
             else:
                 create_transaction(bedrag, imbalance, lopende_rekening, omschrijving, dt)
 
-def test(book):
 
+def test(book):
+    '''
+    Test some functionality. Notice that transactions are created,
+    so saving the book will add two dummy transactions (that cancel each other out).
+    '''
     # Iterating over all splits in all books and print the transaction description:
     for acc in book.accounts:
         print_account_transactions(acc)
 
-    test_transaction
+    test_transaction()
+
 
 def test_transaction():
     # Test transaction: move 1000 euros from spaarrekening to lopende rekening, and back
