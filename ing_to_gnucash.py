@@ -8,6 +8,9 @@ imported and should be manually checked.
 This script uses piecash and assumes you store your data in sq3lite format.
 Make sure to make a backup before testing.
 
+There is currently no filtering on dates, so all transactions provided in the csv will be imported.
+Instead, only request a csv from ING for the time period you want to import.
+
 The bank statement with the most recent format downloaded from ING has the following fields:
 
     - Datum
@@ -34,11 +37,12 @@ The bank statement with the most recent format downloaded from ING has the follo
 
 '''
 
-from piecash import open_book, Transaction, Split  # , Account, Commodity, GnucashException
+from piecash import open_book, Transaction, Split, GnucashException  # , Account, Commodity
 from decimal import Decimal
 from pathlib import Path
 from csv import DictReader
 from datetime import datetime
+import sys
 
 READ_ONLY = False
 
@@ -64,32 +68,6 @@ def print_account_transactions(account):
         transaction = split.transaction
         print(str(transaction.enter_date), str(split.value), currency, split.transaction.description)
     print()
-
-
-# Open book
-book = open_book(INFILE, readonly=READ_ONLY)
-
-# We are currently assuming we always use the default currency
-currency = book.default_currency
-
-# Read in the accounts we need
-# Either by navigation the object tree
-'''
-root = book.root_account
-activa = root.children(name='Activa')
-huidige_activa = activa.children(name='Huidige Activa')
-lopende_rekening = huidige_activa.children(name='Lopende Rekening')
-spaarrekening = huidige_activa.children(name='Spaarrekening')
-'''
-
-# Or accessing by the full name (or by name)
-lopende_rekening = book.accounts(fullname='Activa:Huidige Activa:Lopende Rekening')
-spaarrekening = book.accounts(fullname='Activa:Huidige Activa:Spaarrekening')
-imbalance = book.accounts(name=f'Imbalance-{currency.mnemonic}')
-
-# iterating over all splits in all books and print the transaction description:
-# for acc in book.accounts:
-#    print_account_transactions(acc)
 
 
 def create_transaction(value, from_acc, to_acc, description, datetime):
@@ -132,6 +110,13 @@ def record_ING_transactions(infile):
             else:
                 create_transaction(bedrag, imbalance, lopende_rekening, omschrijving, dt)
 
+def test(book):
+
+    # Iterating over all splits in all books and print the transaction description:
+    for acc in book.accounts:
+        print_account_transactions(acc)
+
+    test_transaction
 
 def test_transaction():
     # Test transaction: move 1000 euros from spaarrekening to lopende rekening, and back
@@ -142,8 +127,34 @@ def test_transaction():
     print("Restored:", lopende_rekening.get_balance())
 
 
-# Save transactions
-book.save()
+if __name__ == '__main__':
 
-# Close the book
-book.close()
+    # Open book
+    try:
+        book = open_book(INFILE, readonly=READ_ONLY)
+    except GnucashException as exc:
+        print("Exception:", exc)
+        sys.exit(1)
+
+    # We are currently assuming we always use the default currency
+    currency = book.default_currency
+
+    # Read in the accounts we need
+    # Either by navigation the object tree, e.g.:
+    # root = book.root_account
+    # activa = root.children(name='Activa')
+    # Or accessing by the full name (or by name)
+    lopende_rekening = book.accounts(fullname='Activa:Huidige Activa:Lopende Rekening')
+    spaarrekening = book.accounts(fullname='Activa:Huidige Activa:Spaarrekening')
+    imbalance = book.accounts(name=f'Imbalance-{currency.mnemonic}')
+
+    # Create records for the transactions in the CSV
+    record_ING_transactions(CSV)
+
+    # test(book)
+
+    # Save transactions to the book
+    book.save()
+
+    # Close the book
+    book.close()
