@@ -45,43 +45,6 @@ import sys
 import yaml
 
 
-'''
-class Transaction(Transaction):
-    # Overrides piecash Transaction class to add an equality function
-    # 
-    # NOTE __hash__ and __cmp__ are used before __eq__ with the "in" operator
-    # where __eq__ is called last:
-    # 'Match' if hash(a) == hash(b) and (a is b or a==b) else 'No Match'
-
-    # Problem with this class: the SQL database may return two types now
-    # Transaction and Transaction; I need to set some flag to allow this
-    # but haven't figured out how. I'll just hardcode the __eq__ function
-    # where I need it ...
-
-    __mapper_args__ = {
-            'polymorphic_identity': 'transactions',
-            'with_polymorphic': '*',
-            'polymorphic_on': ...?
-            }
-
-    def __eq__(self, other):
-        # We consider a transaction to be the same if
-        # it has the same post date, currency, and amount.
-        # NOTE this condition is very weak! Ideally add some sort of id?
-
-        # print(self.post_date, other.post_date)
-        # print(self.currency, other.currency)
-        # print(self.splits[0].value, other.splits[0].value)
-
-        if isinstance(other, Transaction):
-            if (self.post_date == other.post_date and
-                    self.currency == other.currency and
-                    self.splits[0].value == other.splits[0].value):
-                return True
-        return False
-'''
-
-
 def load_config(name='config.yml'):
     '''
     Config file assumed to be in the same folder as this script
@@ -112,8 +75,7 @@ def print_account_transactions(account):
 
 def create_transaction(value, from_acc, to_acc, description, dt):
     '''
-    You don't need to do anything with the return value.
-    The transaction is applied to the book anyways.
+    Creates a transaction and checks whether it's already in the book.
     '''
     value = Decimal(value)
 
@@ -139,7 +101,6 @@ def create_transaction(value, from_acc, to_acc, description, dt):
     # Keep track of duplicates
     duplicate = False
 
-    # print()
     # print("NEW", new_transaction.splits[0].value, new_transaction.splits[1].value)
 
     for transaction in transactions:
@@ -147,6 +108,7 @@ def create_transaction(value, from_acc, to_acc, description, dt):
         if (new_transaction.post_date == transaction.post_date and
                 # NOTE Assuming all transactions are balanced, we can ignore on which side
                 # the checkings account is and just take the absolute value
+                # The order of the splits (i.e. positive or negative first) does not seem meaningful
                 abs(new_transaction.splits[0].value) == abs(transaction.splits[0].value) and
                 new_transaction.currency == transaction.currency):
 
@@ -159,7 +121,47 @@ def create_transaction(value, from_acc, to_acc, description, dt):
     return duplicate
 
 
+def record_ING_transactions(infile):
+    '''
+    TODO number transactions meaningfully; maybe parse info?
+    Goal is to link to real-life documents; will I use this?
+
+    TODO make more generic; get field names from config?
+    '''
+    with open(CSV) as f:
+        reader = DictReader(f, delimiter=SEP)
+        for transaction in reader:
+            dt = datetime.strptime(transaction['Datum'], '%Y%m%d')
+            afbij = transaction['Af Bij']
+            # Convert from 10.000,55 to 10000.55
+            bedrag = transaction['Bedrag (EUR)'].replace('.', '').replace(',', '.')
+            code = transaction['Code']
+            mutatiesoort = transaction['Mutatiesoort']
+            omschrijving = transaction['Naam / Omschrijving']
+            mededelingen = transaction['Mededelingen']
+            descr = ' '.join((mutatiesoort, omschrijving, mededelingen))
+            if afbij == 'Af':
+                duplicate = create_transaction(bedrag, checkings, imbalance, descr, dt)
+            else:
+                duplicate = create_transaction(bedrag, imbalance, checkings, descr, dt)
+
+            # NOTE may be really slow to commit each small edit!
+            if duplicate:
+                # If duplicate, do not save the transaction to the book
+                print("DUPLICATE: ", dt.date(), code, omschrijving, mutatiesoort, mededelingen)
+                book.cancel()
+            else:
+                # Save this transaction to the book
+                print(dt.date(), code, omschrijving, mutatiesoort, mededelingen)
+                book.save()
+
+
 def test_transaction_eq():
+    '''
+    This test made sense when using the overloaded class BankTransaction;
+    not useful anymore because __eq__ is not impemented in the Transaction class.
+    I.e. currently equality checks object equality in memory.
+    '''
 
     value = Decimal(1000)
     from_acc = checkings
@@ -202,45 +204,6 @@ def test_transaction_eq():
 
     print("tr1 == tr2?", tr1 == tr2)
     print("tr1 == tr3?", tr1 == tr3)
-
-
-def record_ING_transactions(infile):
-    '''
-    TODO some transactions I schedule directly in GnuCash
-    I want to detect those as duplicates and NOT add them here.
-    Right now, I have to manually remove them.
-
-    TODO number transactions meaningfully; maybe parse info?
-    Goal is to link to real-life documents; will I use this?
-
-    TODO make more generic; get field names from config?
-    '''
-    with open(CSV) as f:
-        reader = DictReader(f, delimiter=SEP)
-        for transaction in reader:
-            dt = datetime.strptime(transaction['Datum'], '%Y%m%d')
-            afbij = transaction['Af Bij']
-            # Convert from 10.000,55 to 10000.55
-            bedrag = transaction['Bedrag (EUR)'].replace('.', '').replace(',', '.')
-            code = transaction['Code']
-            mutatiesoort = transaction['Mutatiesoort']
-            omschrijving = transaction['Naam / Omschrijving']
-            mededelingen = transaction['Mededelingen']
-            descr = ' '.join((mutatiesoort, omschrijving, mededelingen))
-            if afbij == 'Af':
-                duplicate = create_transaction(bedrag, checkings, imbalance, descr, dt)
-            else:
-                duplicate = create_transaction(bedrag, imbalance, checkings, descr, dt)
-
-            # NOTE may be really slow to commit each small edit!
-            if duplicate:
-                # If duplicate, do not save the transaction to the book
-                print("DUPLICATE: ", dt.date(), code, omschrijving, mutatiesoort, mededelingen)
-                book.cancel()
-            else:
-                # Save this transaction to the book
-                print(dt.date(), code, omschrijving, mutatiesoort, mededelingen)
-                book.save()
 
 
 def test(book):
@@ -326,3 +289,40 @@ if __name__ == '__main__':
 
     # Close the book
     book.close()
+
+
+class BankTransaction(Transaction):
+    '''
+    Overrides piecash Transaction class to add an equality function
+
+    NOTE __hash__ and __cmp__ are used before __eq__ with the "in" operator
+    where __eq__ is called last:
+    'Match' if hash(a) == hash(b) and (a is b or a==b) else 'No Match'
+
+    Problem with this class: the SQL database may return two types now
+    Transaction and Transaction; I need to set some flag to allow this
+    but haven't figured out how. I'll just hardcode the __eq__ function
+    where I need it ...
+
+    __mapper_args__ = {
+            'polymorphic_identity': 'transactions',
+            'with_polymorphic': '*',
+            'polymorphic_on': ...?
+            }
+    '''
+
+    def __eq__(self, other):
+        # We consider a transaction to be the same if
+        # it has the same post date, currency, and amount.
+        # NOTE this condition is very weak! Ideally add some sort of id?
+
+        # print(self.post_date, other.post_date)
+        # print(self.currency, other.currency)
+        # print(self.splits[0].value, other.splits[0].value)
+
+        if isinstance(other, Transaction):
+            if (self.post_date == other.post_date and
+                    self.currency == other.currency and
+                    self.splits[0].value == other.splits[0].value):
+                return True
+        return False
