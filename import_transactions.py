@@ -45,13 +45,51 @@ import sys
 import yaml
 
 
+'''
+class Transaction(Transaction):
+    # Overrides piecash Transaction class to add an equality function
+    # 
+    # NOTE __hash__ and __cmp__ are used before __eq__ with the "in" operator
+    # where __eq__ is called last:
+    # 'Match' if hash(a) == hash(b) and (a is b or a==b) else 'No Match'
+
+    # Problem with this class: the SQL database may return two types now
+    # Transaction and Transaction; I need to set some flag to allow this
+    # but haven't figured out how. I'll just hardcode the __eq__ function
+    # where I need it ...
+
+    __mapper_args__ = {
+            'polymorphic_identity': 'transactions',
+            'with_polymorphic': '*',
+            'polymorphic_on': ...?
+            }
+
+    def __eq__(self, other):
+        # We consider a transaction to be the same if
+        # it has the same post date, currency, and amount.
+        # NOTE this condition is very weak! Ideally add some sort of id?
+
+        # print(self.post_date, other.post_date)
+        # print(self.currency, other.currency)
+        # print(self.splits[0].value, other.splits[0].value)
+
+        if isinstance(other, Transaction):
+            if (self.post_date == other.post_date and
+                    self.currency == other.currency and
+                    self.splits[0].value == other.splits[0].value):
+                return True
+        return False
+'''
+
+
 def load_config(name='config.yml'):
     '''
     Config file assumed to be in the same folder as this script
     '''
     with open(name) as f:
-        cfg = yaml.load(f)
+        cfg = yaml.load(f, Loader=yaml.SafeLoader)
     # Print the config
+    print("CONFIG:")
     for section in cfg:
         print(section, ":")
         print("\t", cfg[section])
@@ -72,21 +110,98 @@ def print_account_transactions(account):
     print()
 
 
-def create_transaction(value, from_acc, to_acc, description, datetime):
+def create_transaction(value, from_acc, to_acc, description, dt):
     '''
     You don't need to do anything with the return value.
     The transaction is applied to the book anyways.
     '''
     value = Decimal(value)
-    return Transaction(
-        currency=currency,
-        description=description,
-        enter_date=datetime,
-        post_date=datetime.date(),
-        splits=[
-            Split(value=-value, account=from_acc),
-            Split(value=value, account=to_acc)],
-        )
+
+    # Check if a transaction already exists
+    # Check relative to the checkings account, because the imbalance split is meant as a placeholder
+    # NOTE hard coded checkings account for now...
+    transactions = [split.transaction for split in checkings.splits]
+
+    # Define the new transaction
+    new_transaction = Transaction(
+            currency=currency,
+            description=description,
+            enter_date=dt,
+            post_date=dt.date(),
+            splits=[
+                Split(value=value, account=to_acc),
+                Split(value=-value, account=from_acc)],
+            )
+
+    # Validate the transaction
+    new_transaction.validate()
+
+    # Keep track of duplicates
+    duplicate = False
+
+    # print()
+    # print("NEW", new_transaction.splits[0].value, new_transaction.splits[1].value)
+
+    for transaction in transactions:
+        # print("OLD", transaction.splits[0].value, transaction.splits[1].value)
+        if (new_transaction.post_date == transaction.post_date and
+                # NOTE Assuming all transactions are balanced, we can ignore on which side
+                # the checkings account is and just take the absolute value
+                abs(new_transaction.splits[0].value) == abs(transaction.splits[0].value) and
+                new_transaction.currency == transaction.currency):
+
+            # if new_transaction == transaction:  # Requires overloading __eq__
+            # print("DUPLICATES:", new_transaction, transaction, "\n")
+            duplicate = True
+
+    print()
+
+    return duplicate
+
+
+def test_transaction_eq():
+
+    value = Decimal(1000)
+    from_acc = checkings
+    to_acc = imbalance
+    description = 'test'
+    dt = datetime.now()
+
+    tr1 = Transaction(
+             currency=currency,
+             description=description,
+             enter_date=dt,
+             post_date=dt.date(),
+             splits=[
+                 Split(value=-value, account=from_acc),
+                 Split(value=value, account=to_acc)],
+              )
+
+    # Same transaction, but different object in memory
+    tr2 = Transaction(
+             currency=currency,
+             description=description,
+             enter_date=dt,
+             post_date=dt.date(),
+             splits=[
+                 Split(value=-value, account=from_acc),
+                 Split(value=value, account=to_acc)],
+              )
+
+    # Change value
+    value = Decimal(500)
+    tr3 = Transaction(
+             currency=currency,
+             description=description,
+             enter_date=dt,
+             post_date=dt.date(),
+             splits=[
+                 Split(value=-value, account=from_acc),
+                 Split(value=value, account=to_acc)],
+              )
+
+    print("tr1 == tr2?", tr1 == tr2)
+    print("tr1 == tr3?", tr1 == tr3)
 
 
 def record_ING_transactions(infile):
@@ -94,8 +209,9 @@ def record_ING_transactions(infile):
     TODO some transactions I schedule directly in GnuCash
     I want to detect those as duplicates and NOT add them here.
     Right now, I have to manually remove them.
-    
+
     TODO number transactions meaningfully; maybe parse info?
+    Goal is to link to real-life documents; will I use this?
 
     TODO make more generic; get field names from config?
     '''
@@ -104,24 +220,34 @@ def record_ING_transactions(infile):
         for transaction in reader:
             dt = datetime.strptime(transaction['Datum'], '%Y%m%d')
             afbij = transaction['Af Bij']
-            # From 10.000,55 to 10000.55
+            # Convert from 10.000,55 to 10000.55
             bedrag = transaction['Bedrag (EUR)'].replace('.', '').replace(',', '.')
             code = transaction['Code']
             mutatiesoort = transaction['Mutatiesoort']
             omschrijving = transaction['Naam / Omschrijving']
             mededelingen = transaction['Mededelingen']
-            print(dt.date(), code, omschrijving, mutatiesoort, mededelingen)
-            descr = ' '.join((mutatiesoort, omschrijving))
+            descr = ' '.join((mutatiesoort, omschrijving, mededelingen))
             if afbij == 'Af':
-                create_transaction(bedrag, checkings, imbalance, descr, dt)
+                duplicate = create_transaction(bedrag, checkings, imbalance, descr, dt)
             else:
-                create_transaction(bedrag, imbalance, checkings, descr, dt)
+                duplicate = create_transaction(bedrag, imbalance, checkings, descr, dt)
+
+            # NOTE may be really slow to commit each small edit!
+            if duplicate:
+                # If duplicate, do not save the transaction to the book
+                print("DUPLICATE: ", dt.date(), code, omschrijving, mutatiesoort, mededelingen)
+                book.cancel()
+            else:
+                # Save this transaction to the book
+                print(dt.date(), code, omschrijving, mutatiesoort, mededelingen)
+                book.save()
 
 
 def test(book):
     '''
     Test some functionality. Notice that transactions are created,
     so saving the book will add two dummy transactions (that cancel each other out).
+    Instead, we cancel all uncommited changes (also ones unsaved *before* the test function!).
     '''
     # Iterating over all splits in all books and print the transaction description:
     for acc in book.accounts:
@@ -129,6 +255,12 @@ def test(book):
 
     # Test transaction: move 1000 euros from savings to lopende rekening, and back
     test_transaction()
+
+    # Test equality function between transactions
+    test_transaction_eq()
+
+    # Cancel dummy transactions
+    book.cancel()
 
 
 def test_transaction():
@@ -173,7 +305,7 @@ if __name__ == '__main__':
     # Create an imbalance account under root account if it does not exist yet
     # The naming follows GnuCash convention, e.g. 'Imbalance-EUR'
     imbalance_fn = f'Imbalance-{currency.mnemonic}'
-    # imbalance_fn = f'Imbalance-TEST'
+
     try:
         imbalance = book.accounts(name=imbalance_fn)
     except KeyError:
@@ -191,9 +323,6 @@ if __name__ == '__main__':
     record_ING_transactions(CSV)
 
     # test(book)
-
-    # Save transactions to the book
-    book.save()
 
     # Close the book
     book.close()
