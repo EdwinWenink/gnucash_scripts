@@ -1,6 +1,7 @@
 bank:  # specify full name to avoid ambiguity
     checkings: 'Activa:Huidige Activa:Lopende Rekening'
     savings: 'Activa:Huidige Activa:Spaarrekening'
+    from_account: 'checkings'  # Whether you are importing transactions for the checkings or savings account
 locations:
     dir: 'Documents/Financien/'  # Relative to your home folder 
     book: 'practice.gnucash'  # relative to dir

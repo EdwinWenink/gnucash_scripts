@@ -33,7 +33,6 @@ The bank statement with the most recent format downloaded from ING has the follo
 
 - CSV: bank_statement.csv
 - Ledger: practice.gnucash
-
 '''
 
 from piecash import open_book, Transaction, Split, GnucashException, Account  # , Commodity
@@ -80,9 +79,8 @@ def create_transaction(value, from_acc, to_acc, description, dt):
     value = Decimal(value)
 
     # Check if a transaction already exists
-    # Check relative to the checkings account, because the imbalance split is meant as a placeholder
-    # NOTE hard coded checkings account for now...
-    transactions = [split.transaction for split in checkings.splits]
+    # Check relative to the main account, because the imbalance split is meant as a placeholder
+    transactions = [split.transaction for split in MAIN_ACCOUNT.splits]
 
     # Define the new transaction
     new_transaction = Transaction(
@@ -107,7 +105,7 @@ def create_transaction(value, from_acc, to_acc, description, dt):
         # print("OLD", transaction.splits[0].value, transaction.splits[1].value)
         if (new_transaction.post_date == transaction.post_date and
                 # NOTE Assuming all transactions are balanced, we can ignore on which side
-                # the checkings account is and just take the absolute value
+                # the main account is and just take the absolute value
                 # The order of the splits (i.e. positive or negative first) does not seem meaningful
                 abs(new_transaction.splits[0].value) == abs(transaction.splits[0].value) and
                 new_transaction.currency == transaction.currency):
@@ -115,8 +113,6 @@ def create_transaction(value, from_acc, to_acc, description, dt):
             # if new_transaction == transaction:  # Requires overloading __eq__
             # print("DUPLICATES:", new_transaction, transaction, "\n")
             duplicate = True
-
-    print()
 
     return duplicate
 
@@ -141,9 +137,9 @@ def record_ING_transactions(infile):
             mededelingen = transaction['Mededelingen']
             descr = ' '.join((mutatiesoort, omschrijving, mededelingen))
             if afbij == 'Af':
-                duplicate = create_transaction(bedrag, checkings, imbalance, descr, dt)
+                duplicate = create_transaction(bedrag, MAIN_ACCOUNT, imbalance, descr, dt)
             else:
-                duplicate = create_transaction(bedrag, imbalance, checkings, descr, dt)
+                duplicate = create_transaction(bedrag, imbalance, MAIN_ACCOUNT, descr, dt)
 
             # NOTE may be really slow to commit each small edit!
             if duplicate:
@@ -164,7 +160,7 @@ def test_transaction_eq():
     '''
 
     value = Decimal(1000)
-    from_acc = checkings
+    from_acc = MAIN_ACCOUNT
     to_acc = imbalance
     description = 'test'
     dt = datetime.now()
@@ -248,6 +244,7 @@ if __name__ == '__main__':
     INFILE = BASE_DIR / cfg['locations']['book']
     CSV = BASE_DIR / cfg['locations']['bank_statement']
     SEP = cfg['csv_delimiter']
+    FROM_ACCOUNT = cfg['bank']['from_account']
 
     # Open book
     try:
@@ -264,6 +261,12 @@ if __name__ == '__main__':
     root = book.root_account
     checkings = book.accounts(fullname=cfg['bank']['checkings'])
     savings = book.accounts(fullname=cfg['bank']['savings'])
+
+    # Select from which account the transactions are imported
+    if FROM_ACCOUNT.lower() == 'checkings':
+        MAIN_ACCOUNT = checkings
+    elif FROM_ACCOUNT.lower() == 'savings':
+        MAIN_ACCOUNT = savings
 
     # Create an imbalance account under root account if it does not exist yet
     # The naming follows GnuCash convention, e.g. 'Imbalance-EUR'
