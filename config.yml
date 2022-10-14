@@ -4,7 +4,7 @@ bank:  # specify full name to avoid ambiguity
     from_account: 'checkings'  # Whether you are importing transactions for the checkings or savings account
 locations:
     dir: 'Documents/Financien/'  # Relative to your home folder 
-    book: 'practice.gnucash'  # relative to dir
+    book: 'ledger.gnucash'  # relative to dir
     bank_statement: 'bank_statement.csv'  # relative to dir
 read_only: false
 csv_delimiter: ';'

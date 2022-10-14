@@ -40,15 +40,17 @@ from decimal import Decimal
 from pathlib import Path
 from csv import DictReader
 from datetime import datetime
+from argparse import ArgumentParser
 import sys
 import yaml
 
 
-def load_config(name='config.yml'):
+def load_config(fn='config.yml'):
     '''
     Config file assumed to be in the same folder as this script
     '''
-    with open(name) as f:
+    print("Config location:", fn)
+    with open(fn) as f:
         cfg = yaml.load(f, Loader=yaml.SafeLoader)
     # Print the config
     print("CONFIG:")
@@ -233,10 +235,53 @@ def test_transaction():
     print("Restored:", checkings.get_balance())
 
 
+class BankTransaction(Transaction):
+    '''
+    Overrides piecash Transaction class to add an equality function
+
+    NOTE __hash__ and __cmp__ are used before __eq__ with the "in" operator
+    where __eq__ is called last:
+    'Match' if hash(a) == hash(b) and (a is b or a==b) else 'No Match'
+
+    Problem with this class: the SQL database may return two types now
+    Transaction and Transaction; I need to set some flag to allow this
+    but haven't figured out how. I'll just hardcode the __eq__ function
+    where I need it ...
+
+    __mapper_args__ = {
+            'polymorphic_identity': 'transactions',
+            'with_polymorphic': '*',
+            'polymorphic_on': ...?
+            }
+    '''
+
+    def __eq__(self, other):
+        # We consider a transaction to be the same if
+        # it has the same post date, currency, and amount.
+        # NOTE this condition is very weak! Ideally add some sort of id?
+
+        # print(self.post_date, other.post_date)
+        # print(self.currency, other.currency)
+        # print(self.splits[0].value, other.splits[0].value)
+
+        if isinstance(other, Transaction):
+            if (self.post_date == other.post_date and
+                    self.currency == other.currency and
+                    self.splits[0].value == other.splits[0].value):
+                return True
+        return False
+
+
 if __name__ == '__main__':
 
+    # Default location for config file is folder of script
+    # Override with command line argument
+    parser = ArgumentParser()
+    parser.add_argument("-c", "--config", dest='fn', default='config.yml')
+    args = parser.parse_args()
+
     # Load config
-    cfg = load_config(name='config.yml')
+    cfg = load_config(args.fn)
 
     # Define global variables, reading from config
     READ_ONLY = cfg['read_only']
@@ -292,40 +337,3 @@ if __name__ == '__main__':
 
     # Close the book
     book.close()
-
-
-class BankTransaction(Transaction):
-    '''
-    Overrides piecash Transaction class to add an equality function
-
-    NOTE __hash__ and __cmp__ are used before __eq__ with the "in" operator
-    where __eq__ is called last:
-    'Match' if hash(a) == hash(b) and (a is b or a==b) else 'No Match'
-
-    Problem with this class: the SQL database may return two types now
-    Transaction and Transaction; I need to set some flag to allow this
-    but haven't figured out how. I'll just hardcode the __eq__ function
-    where I need it ...
-
-    __mapper_args__ = {
-            'polymorphic_identity': 'transactions',
-            'with_polymorphic': '*',
-            'polymorphic_on': ...?
-            }
-    '''
-
-    def __eq__(self, other):
-        # We consider a transaction to be the same if
-        # it has the same post date, currency, and amount.
-        # NOTE this condition is very weak! Ideally add some sort of id?
-
-        # print(self.post_date, other.post_date)
-        # print(self.currency, other.currency)
-        # print(self.splits[0].value, other.splits[0].value)
-
-        if isinstance(other, Transaction):
-            if (self.post_date == other.post_date and
-                    self.currency == other.currency and
-                    self.splits[0].value == other.splits[0].value):
-                return True
-        return False
